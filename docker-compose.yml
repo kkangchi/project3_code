@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL 데이터베이스
+  postgres:
+    image: postgres:15-alpine
+    container_name: zero-watch-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: password1234
+      POSTGRES_DB: zerowatch_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # 2. Redis 세션/블랙리스트 서버
+  redis:
+    image: redis:alpine
+    container_name: zero-watch-redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:

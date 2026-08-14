@@ -1,0 +1,29 @@
+@baseUrl = http://localhost:3000/api
+
+### 1. 회원가입 테스트
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "test@zerowatch.com",
+  "password": "password1234",
+  "name": "홍길동"
+}
+
+### 2. 로그인 테스트 (응답 쿠키/토큰 자동 수집)
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@zerowatch.com",
+  "password": "password1234"
+}
+
+### 3. 세션 및 내 정보 검증 테스트 (자동 연결)
+GET {{baseUrl}}/auth/me
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### 4. 로그아웃 테스트
+POST {{baseUrl}}/auth/logout
+Cookie: {{login.response.headers.Set-Cookie}}

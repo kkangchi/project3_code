@@ -1,0 +1,40 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 1. 사용자 계정 모델
+model User {
+  id            String      @id @default(uuid())
+  email         String      @unique
+  password      String
+  name          String
+  role          String      @default("USER")
+  mfaSecret     String?
+  isMfaActive   Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  accessLogs    AccessLog[]
+}
+
+// 2. 이상 접속 및 로그인 로그 모델
+model AccessLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  ipAddress String
+  action    String
+  isAnomaly Boolean  @default(false)
+  reason    String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
