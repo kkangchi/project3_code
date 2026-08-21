@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -21,6 +16,8 @@ model User {
   role          String      @default("USER")
   mfaSecret     String?
   isMfaActive   Boolean     @default(false)
+  profile       String      @default("LOW") // LOW | HIGH | ZERO_TRUST
+  lastCountry   String?     // 직전 로그인 국가 (GeoIP 비교용)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
   accessLogs    AccessLog[]
@@ -37,4 +34,12 @@ model AccessLog {
   createdAt DateTime @default(now())
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+// 3. 차단된 IP 블랙리스트 모델
+model Blacklist {
+  id        String   @id @default(uuid())
+  ipAddress String   @unique
+  reason    String?
+  createdAt DateTime @default(now())
 }
