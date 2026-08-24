@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import geoip from 'geoip-lite';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
 
@@ -9,9 +10,11 @@ export async function POST(req: NextRequest) {
   try {
     const { email, password } = await req.json();
 
-    // 접속 클라이언트 IP 추출
     const forwardedFor = req.headers.get('x-forwarded-for');
     const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : '127.0.0.1';
+
+    const geo = geoip.lookup(clientIp);
+    const currentCountry = geo ? geo.country : 'UNKNOWN';
 
     if (!email || !password) {
       return NextResponse.json(
@@ -20,13 +23,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1. 유저 존재 여부 확인
     const user = await prisma.user.findUnique({
       where: { email },
     });
 
     if (!user) {
-      // 실패 로그 기록 (계정 없음)
       await prisma.accessLog.create({
         data: {
           ipAddress: clientIp,
@@ -42,11 +43,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. 비밀번호 일치 여부 확인
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
-      // 실패 로그 기록 (비밀번호 불일치)
       await prisma.accessLog.create({
         data: {
           userId: user.id,
@@ -63,28 +62,48 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. 로그인 성공 로그 기록
+    const lastSuccessLog = await prisma.accessLog.findFirst({
+      where: {
+        userId: user.id,
+        action: 'LOGIN_SUCCESS',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    let isAnomaly = false;
+    let reason = 'Login successful';
+
+    if (lastSuccessLog) {
+      const lastGeo = geoip.lookup(lastSuccessLog.ipAddress);
+      const lastCountry = lastGeo ? lastGeo.country : 'UNKNOWN';
+
+      if (lastCountry !== 'UNKNOWN' && currentCountry !== 'UNKNOWN' && lastCountry !== currentCountry) {
+        isAnomaly = true;
+        reason = `이전 접속 국가(${lastCountry})와 다른 국가(${currentCountry})에서 접속함`;
+      }
+    }
+
     await prisma.accessLog.create({
       data: {
         userId: user.id,
         ipAddress: clientIp,
         action: 'LOGIN_SUCCESS',
-        isAnomaly: false,
-        reason: 'Login successful',
+        isAnomaly,
+        reason,
       },
     });
 
-    // 4. JWT 토큰 발급
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       JWT_SECRET,
       { expiresIn: '1d' }
     );
 
-    // 5. 쿠키 설정 및 응답 반환
     const response = NextResponse.json(
       {
         message: '로그인 성공',
+        isAnomaly,
+        reason,
         user: {
           id: user.id,
           email: user.email,
@@ -99,7 +118,7 @@ export async function POST(req: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24, // 1일
+      maxAge: 60 * 60 * 24,
       path: '/',
     });
 
