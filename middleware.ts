@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export async function middleware(req: NextRequest){
+export async function middleware(req: NextRequest) {
+  // 내부 검증 API 호출 자체는 미들웨어 검사 스킵 (무한 재호출 방지)
+  if (req.nextUrl.pathname.startsWith('/api/internal/')) {
+    return NextResponse.next();
+  }
+
   const forwardedFor = req.headers.get('x-forwarded-for');
   const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : '127.0.0.1';
 
@@ -16,12 +21,11 @@ export async function middleware(req: NextRequest){
     }
   } catch (error) {
     console.error('Blacklist check error:', error);
-    // 확인 실패 시 시스템 중단을 막기 위해 일단 통과 (fail-open)
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: '/api/:path*',
+  matcher: ['/api/:path*'],
 };
