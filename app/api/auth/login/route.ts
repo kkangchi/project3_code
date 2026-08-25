@@ -6,7 +6,7 @@ import geoip from 'geoip-lite';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
 
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest){
   try {
     const { email, password } = await req.json();
 
