@@ -2,9 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import geoip from 'geoip-lite';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
+
+// ip-api.com을 활용한 국가 코드 조회
+async function getCountryByIp(ip: string): Promise<string>{
+  try {
+    if (ip === '127.0.0.1' || ip.startsWith('10.') || ip.startsWith('192.168.')) {
+      return 'UNKNOWN';
+    }
+    const res = await fetch(`http://ip-api.com/json/${ip}?fields=countryCode`);
+    const data = await res.json();
+    return data.countryCode || 'UNKNOWN';
+  } catch (error) {
+    console.error('GeoIP lookup error:', error);
+    return 'UNKNOWN';
+  }
+}
 
 export async function POST(req: NextRequest){
   try {
@@ -13,8 +27,7 @@ export async function POST(req: NextRequest){
     const forwardedFor = req.headers.get('x-forwarded-for');
     const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : '127.0.0.1';
 
-    const geo = geoip.lookup(clientIp);
-    const currentCountry = geo ? geo.country : 'UNKNOWN';
+    const currentCountry = await getCountryByIp(clientIp);
 
     if (!email || !password) {
       return NextResponse.json(
@@ -74,8 +87,7 @@ export async function POST(req: NextRequest){
     let reason = 'Login successful';
 
     if (lastSuccessLog) {
-      const lastGeo = geoip.lookup(lastSuccessLog.ipAddress);
-      const lastCountry = lastGeo ? lastGeo.country : 'UNKNOWN';
+      const lastCountry = await getCountryByIp(lastSuccessLog.ipAddress);
 
       if (lastCountry !== 'UNKNOWN' && currentCountry !== 'UNKNOWN' && lastCountry !== currentCountry) {
         isAnomaly = true;
