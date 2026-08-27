@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
 
-async function getCountryByIp(ip: string): Promise<string> {
+async function getCountryByIp(ip: string): Promise<string>{
   try {
     if (ip === '127.0.0.1' || ip.startsWith('10.') || ip.startsWith('192.168.')) {
       return 'UNKNOWN';
@@ -21,8 +21,7 @@ async function getCountryByIp(ip: string): Promise<string> {
 
 function issueLoginResponse(
   user: { id: string; email: string; name: string; role: string },
-  extra: Record<string, unknown> = {}
-) {
+  extra: Record<string, unknown> = {}){
   const token = jwt.sign(
     { userId: user.id, email: user.email, role: user.role },
     JWT_SECRET,
@@ -49,7 +48,7 @@ function issueLoginResponse(
   return response;
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest){
   try {
     const { email, password } = await req.json();
 
