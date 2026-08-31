@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import { createSession } from '@/lib/session';
+import { redisPub } from '@/lib/redis';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
-
-async function getCountryByIp(ip: string): Promise<string>{
+async function getCountryByIp(ip: string): Promise<string> {
   try {
     if (ip === '127.0.0.1' || ip.startsWith('10.') || ip.startsWith('192.168.')) {
       return 'UNKNOWN';
@@ -19,24 +18,64 @@ async function getCountryByIp(ip: string): Promise<string>{
   }
 }
 
-function issueLoginResponse(
+// 이상 감지 시 Redis Pub/Sub 이벤트 발행
+async function publishAnomaly(user: { id: string; email: string }, clientIp: string, reason: string, trustLevel: string) {
+  await redisPub.publish(
+    'login:anomaly',
+    JSON.stringify({
+      userId: user.id,
+      email: user.email,
+      ipAddress: clientIp,
+      reason,
+      trustLevel,
+      timestamp: new Date().toISOString(),
+    })
+  );
+}
+
+// 로그인 성공 처리 (Redis 세션 생성 + JWT 쿠키 설정 + Pub/Sub 성공 이벤트 발행)
+async function issueLoginResponse(
   user: { id: string; email: string; name: string; role: string },
-  extra: Record<string, unknown> = {}){
-  const token = jwt.sign(
-    { userId: user.id, email: user.email, role: user.role },
-    JWT_SECRET,
-    { expiresIn: '1d' }
+  clientIp: string,
+  trustLevel: string,
+  isAnomaly: boolean,
+  extra: Record<string, unknown> = {}
+) {
+  // 1. Redis 세션 생성 및 JWT 토큰 발급
+  const { token, sessionId } = await createSession({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    ipAddress: clientIp,
+  });
+
+  // 2. 로그인 성공 이벤트 Pub/Sub 발행
+  await redisPub.publish(
+    'login:success',
+    JSON.stringify({
+      userId: user.id,
+      email: user.email,
+      ipAddress: clientIp,
+      trustLevel,
+      isAnomaly,
+      timestamp: new Date().toISOString(),
+    })
   );
 
+  // 3. 응답 객체 구성
   const response = NextResponse.json(
     {
       message: '로그인 성공',
       user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      sessionId,
+      trustLevel,
+      isAnomaly,
       ...extra,
     },
     { status: 200 }
   );
 
+  // 4. HTTP-Only 쿠키에 토큰 설정
   response.cookies.set('token', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -48,7 +87,7 @@ function issueLoginResponse(
   return response;
 }
 
-export async function POST(req: NextRequest){
+export async function POST(req: NextRequest) {
   try {
     const { email, password } = await req.json();
 
@@ -101,15 +140,24 @@ export async function POST(req: NextRequest){
           reason: `[LOW] ${isAnomaly ? `${anomalyDetail} (프로파일 정책상 통과)` : '정상 로그인'}`,
         },
       });
+      if (isAnomaly) {
+        await publishAnomaly(user, clientIp, anomalyDetail, 'LOW');
+      }
       await prisma.user.update({ where: { id: user.id }, data: { lastCountry: currentCountry } });
-      return issueLoginResponse(user, { trustLevel: 'LOW', isAnomaly });
+      return await issueLoginResponse(user, clientIp, 'LOW', isAnomaly);
     }
 
     // ── HIGH: 이상 여부 무관하게 무조건 OTP 요구 ──
     if (user.profile === 'HIGH') {
       if (!user.mfaSecret) {
         await prisma.accessLog.create({
-          data: { userId: user.id, ipAddress: clientIp, action: 'LOGIN_BLOCKED', isAnomaly, reason: `[HIGH] OTP 미등록으로 로그인 불가 (${anomalyDetail})` },
+          data: {
+            userId: user.id,
+            ipAddress: clientIp,
+            action: 'LOGIN_BLOCKED',
+            isAnomaly,
+            reason: `[HIGH] OTP 미등록으로 로그인 불가 (${anomalyDetail})`,
+          },
         });
         return NextResponse.json(
           { error: 'HIGH 프로파일은 OTP 등록이 필요합니다. /api/auth/otp/setup을 먼저 진행하세요.', trustLevel: 'HIGH' },
@@ -117,8 +165,17 @@ export async function POST(req: NextRequest){
         );
       }
       await prisma.accessLog.create({
-        data: { userId: user.id, ipAddress: clientIp, action: 'LOGIN_OTP_REQUIRED', isAnomaly, reason: `[HIGH] ID/PW 통과, OTP 검증 대기 (${anomalyDetail})` },
+        data: {
+          userId: user.id,
+          ipAddress: clientIp,
+          action: 'LOGIN_OTP_REQUIRED',
+          isAnomaly,
+          reason: `[HIGH] ID/PW 통과, OTP 검증 대기 (${anomalyDetail})`,
+        },
       });
+      if (isAnomaly) {
+        await publishAnomaly(user, clientIp, anomalyDetail, 'HIGH');
+      }
       return NextResponse.json(
         { message: 'OTP 인증이 필요합니다.', requireOtp: true, trustLevel: 'HIGH', userId: user.id },
         { status: 200 }
@@ -131,12 +188,21 @@ export async function POST(req: NextRequest){
         data: { userId: user.id, ipAddress: clientIp, action: 'LOGIN_SUCCESS', isAnomaly, reason: '[ZERO_TRUST] 정상 위치 접근' },
       });
       await prisma.user.update({ where: { id: user.id }, data: { lastCountry: currentCountry } });
-      return issueLoginResponse(user, { trustLevel: 'ZERO_TRUST', isAnomaly });
+      return await issueLoginResponse(user, clientIp, 'ZERO_TRUST', isAnomaly);
     }
+
+    // ZERO_TRUST + 이상 접근 감지 시
+    await publishAnomaly(user, clientIp, `ZERO_TRUST ${anomalyDetail}`, 'ZERO_TRUST');
 
     if (user.mfaSecret) {
       await prisma.accessLog.create({
-        data: { userId: user.id, ipAddress: clientIp, action: 'LOGIN_OTP_REQUIRED', isAnomaly, reason: `[ZERO_TRUST] ${anomalyDetail} -> OTP 요구` },
+        data: {
+          userId: user.id,
+          ipAddress: clientIp,
+          action: 'LOGIN_OTP_REQUIRED',
+          isAnomaly,
+          reason: `[ZERO_TRUST] ${anomalyDetail} -> OTP 요구`,
+        },
       });
       return NextResponse.json(
         { message: '이상 접근이 감지되었습니다. OTP 인증이 필요합니다.', requireOtp: true, trustLevel: 'ZERO_TRUST', userId: user.id },
@@ -146,7 +212,13 @@ export async function POST(req: NextRequest){
 
     // OTP 미등록 + 이상 접근 → 관리자 승인 대기 차단
     await prisma.accessLog.create({
-      data: { userId: user.id, ipAddress: clientIp, action: 'LOGIN_BLOCKED', isAnomaly, reason: `[ZERO_TRUST] ${anomalyDetail} + OTP 미등록 -> 관리자 승인 대기` },
+      data: {
+        userId: user.id,
+        ipAddress: clientIp,
+        action: 'LOGIN_BLOCKED',
+        isAnomaly,
+        reason: `[ZERO_TRUST] ${anomalyDetail} + OTP 미등록 -> 관리자 승인 대기`,
+      },
     });
     return NextResponse.json(
       { error: '이상 접근이 감지되었으며 OTP가 미등록 상태입니다. 관리자 승인이 필요합니다.', trustLevel: 'ZERO_TRUST', status: 'PENDING_ADMIN_APPROVAL' },
