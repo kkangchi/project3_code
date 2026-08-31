@@ -10,18 +10,18 @@ datasource db {
 
 // 1. 사용자 계정 모델
 model User {
-  id            String      @id @default(uuid())
-  email         String      @unique
-  password      String
-  name          String
-  role          String      @default("USER")
-  mfaSecret     String?
-  isMfaActive   Boolean     @default(false)
-  profile       String      @default("LOW") // LOW | HIGH | ZERO_TRUST
-  lastCountry   String?     // 직전 로그인 국가 (GeoIP 비교용)
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  accessLogs    AccessLog[]
+  id           String      @id @default(uuid())
+  email        String      @unique
+  password     String
+  name         String
+  role         String      @default("USER")
+  mfaSecret    String?
+  isMfaActive  Boolean     @default(false)
+  profile      String      @default("LOW") // LOW | HIGH | ZERO_TRUST
+  lastCountry  String?     // 직전 로그인 국가 (GeoIP 비교용)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  accessLogs   AccessLog[]
 }
 
 // 2. 이상 접속 및 로그인 로그 모델
@@ -39,8 +39,10 @@ model AccessLog {
 
 // 3. 차단된 IP 블랙리스트 모델
 model Blacklist {
-  id        String   @id @default(uuid())
-  ipAddress String   @unique
-  reason    String?
-  createdAt DateTime @default(now())
+  id         String    @id @default(uuid())
+  ipAddress  String    @unique
+  reason     String?
+  ruleNumber Int?      // NACL 규칙 번호 (1000~1999), 수동 등록 IP는 null
+  expiresAt  DateTime? // 자동 만료 시각, 수동 등록 IP는 null(영구)
+  createdAt  DateTime  @default(now())
 }
