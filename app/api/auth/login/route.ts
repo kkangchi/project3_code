@@ -204,4 +204,4 @@ export async function POST(req: NextRequest) {
     console.error('Login Error:', error);
     return NextResponse.json({ error: '로그인 처리 중 오류가 발생했습니다.' }, { status: 500 });
   }
-}
+} 
