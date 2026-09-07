@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import speakeasy from 'speakeasy';
 import { createSession } from '@/lib/session';
 import { redisPub } from '@/lib/redis';
+import { recordLoginFailure, resetLoginFailure } from '@/lib/loginFailGuard';
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,6 +29,7 @@ export async function POST(req: NextRequest) {
       window: 1,
     });
 
+    // 1. OTP 검증 실패 분기 (실패 카운팅 반영)
     if (!verified) {
       await prisma.accessLog.create({
         data: {
@@ -38,6 +40,7 @@ export async function POST(req: NextRequest) {
           reason: '[OTP] 로그인 중 OTP 검증 실패',
         },
       });
+      await recordLoginFailure(clientIp, 'OTP verification failed');
       return NextResponse.json({ error: '유효하지 않거나 만료된 OTP 번호입니다.' }, { status: 401 });
     }
 
@@ -65,7 +68,7 @@ export async function POST(req: NextRequest) {
       data: { lastCountry: currentCountry },
     });
 
-    // 1. Redis 세션 생성 및 JWT 토큰 발급
+    // 2. Redis 세션 생성 및 JWT 토큰 발급
     const { token: jwtToken, sessionId } = await createSession({
       userId: user.id,
       email: user.email,
@@ -73,7 +76,10 @@ export async function POST(req: NextRequest) {
       ipAddress: clientIp,
     });
 
-    // 2. 로그인 성공 Redis Pub/Sub 이벤트 발행
+    // 3. OTP 검증 성공 시 누적된 IP 실패 카운트 리셋
+    await resetLoginFailure(clientIp);
+
+    // 4. 로그인 성공 Redis Pub/Sub 이벤트 발행
     await redisPub.publish(
       'login:success',
       JSON.stringify({
@@ -86,7 +92,7 @@ export async function POST(req: NextRequest) {
       })
     );
 
-    // 3. 응답 반환 (sessionId 포함)
+    // 5. 응답 반환 (sessionId 포함)
     const response = NextResponse.json(
       {
         message: 'OTP 인증 완료, 로그인 성공',
@@ -97,7 +103,7 @@ export async function POST(req: NextRequest) {
       { status: 200 }
     );
 
-    // 4. HTTP-Only 쿠키에 토큰 저장
+    // 6. HTTP-Only 쿠키에 토큰 저장
     response.cookies.set('token', jwtToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',

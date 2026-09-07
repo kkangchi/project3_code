@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import { createSession } from '@/lib/session';
 import { redisPub } from '@/lib/redis';
+import { recordLoginFailure, resetLoginFailure } from '@/lib/loginFailGuard';
 
 async function getCountryByIp(ip: string): Promise<string> {
   try {
@@ -33,7 +34,7 @@ async function publishAnomaly(user: { id: string; email: string }, clientIp: str
   );
 }
 
-// 로그인 성공 처리 (Redis 세션 생성 + JWT 쿠키 설정 + Pub/Sub 성공 이벤트 발행)
+// 로그인 성공 처리 (Redis 세션 생성 + JWT 쿠키 설정 + Pub/Sub 성공 이벤트 발행 + 실패 카운트 리셋)
 async function issueLoginResponse(
   user: { id: string; email: string; name: string; role: string },
   clientIp: string,
@@ -49,7 +50,10 @@ async function issueLoginResponse(
     ipAddress: clientIp,
   });
 
-  // 2. 로그인 성공 이벤트 Pub/Sub 발행
+  // 2. 로그인 성공 시 누적된 IP 실패 카운트 리셋
+  await resetLoginFailure(clientIp);
+
+  // 3. 로그인 성공 이벤트 Pub/Sub 발행
   await redisPub.publish(
     'login:success',
     JSON.stringify({
@@ -62,7 +66,7 @@ async function issueLoginResponse(
     })
   );
 
-  // 3. 응답 객체 구성
+  // 4. 응답 객체 구성
   const response = NextResponse.json(
     {
       message: '로그인 성공',
@@ -75,7 +79,7 @@ async function issueLoginResponse(
     { status: 200 }
   );
 
-  // 4. HTTP-Only 쿠키에 토큰 설정
+  // 5. HTTP-Only 쿠키에 토큰 설정
   response.cookies.set('token', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -102,19 +106,23 @@ export async function POST(req: NextRequest) {
 
     const user = await prisma.user.findUnique({ where: { email } });
 
+    // 1. 존재하지 않는 계정 분기 (실패 카운팅 반영)
     if (!user) {
       await prisma.accessLog.create({
         data: { ipAddress: clientIp, action: 'LOGIN_FAILED', isAnomaly: true, reason: 'User not found' },
       });
+      await recordLoginFailure(clientIp, 'User not found');
       return NextResponse.json({ error: '존재하지 않는 이메일입니다.' }, { status: 401 });
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
+    // 2. 비밀번호 불일치 분기 (실패 카운팅 반영)
     if (!isPasswordValid) {
       await prisma.accessLog.create({
         data: { userId: user.id, ipAddress: clientIp, action: 'LOGIN_FAILED', isAnomaly: true, reason: 'Invalid password' },
       });
+      await recordLoginFailure(clientIp, 'Invalid password');
       return NextResponse.json({ error: '비밀번호가 일치하지 않습니다.' }, { status: 401 });
     }
 
