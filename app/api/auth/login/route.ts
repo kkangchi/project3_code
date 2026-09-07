@@ -19,7 +19,6 @@ async function getCountryByIp(ip: string): Promise<string> {
   }
 }
 
-// 이상 감지 시 Redis Pub/Sub 이벤트 발행
 async function publishAnomaly(user: { id: string; email: string }, clientIp: string, reason: string, trustLevel: string) {
   await redisPub.publish(
     'login:anomaly',
@@ -34,7 +33,6 @@ async function publishAnomaly(user: { id: string; email: string }, clientIp: str
   );
 }
 
-// 로그인 성공 처리 (Redis 세션 생성 + JWT 쿠키 설정 + Pub/Sub 성공 이벤트 발행 + 실패 카운트 리셋)
 async function issueLoginResponse(
   user: { id: string; email: string; name: string; role: string },
   clientIp: string,
@@ -42,7 +40,6 @@ async function issueLoginResponse(
   isAnomaly: boolean,
   extra: Record<string, unknown> = {}
 ) {
-  // 1. Redis 세션 생성 및 JWT 토큰 발급
   const { token, sessionId } = await createSession({
     userId: user.id,
     email: user.email,
@@ -50,10 +47,8 @@ async function issueLoginResponse(
     ipAddress: clientIp,
   });
 
-  // 2. 로그인 성공 시 누적된 IP 실패 카운트 리셋
   await resetLoginFailure(clientIp);
 
-  // 3. 로그인 성공 이벤트 Pub/Sub 발행
   await redisPub.publish(
     'login:success',
     JSON.stringify({
@@ -66,7 +61,6 @@ async function issueLoginResponse(
     })
   );
 
-  // 4. 응답 객체 구성
   const response = NextResponse.json(
     {
       message: '로그인 성공',
@@ -79,7 +73,6 @@ async function issueLoginResponse(
     { status: 200 }
   );
 
-  // 5. HTTP-Only 쿠키에 토큰 설정
   response.cookies.set('token', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -94,10 +87,8 @@ async function issueLoginResponse(
 export async function POST(req: NextRequest) {
   try {
     const { email, password } = await req.json();
-
     const forwardedFor = req.headers.get('x-forwarded-for');
     const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : '127.0.0.1';
-
     const currentCountry = await getCountryByIp(clientIp);
 
     if (!email || !password) {
@@ -106,7 +97,6 @@ export async function POST(req: NextRequest) {
 
     const user = await prisma.user.findUnique({ where: { email } });
 
-    // 1. 존재하지 않는 계정 분기 (실패 카운팅 반영)
     if (!user) {
       await prisma.accessLog.create({
         data: { ipAddress: clientIp, action: 'LOGIN_FAILED', isAnomaly: true, reason: 'User not found' },
@@ -116,8 +106,6 @@ export async function POST(req: NextRequest) {
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
-
-    // 2. 비밀번호 불일치 분기 (실패 카운팅 반영)
     if (!isPasswordValid) {
       await prisma.accessLog.create({
         data: { userId: user.id, ipAddress: clientIp, action: 'LOGIN_FAILED', isAnomaly: true, reason: 'Invalid password' },
@@ -126,10 +114,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '비밀번호가 일치하지 않습니다.' }, { status: 401 });
     }
 
-    // ── 이상 접근 판단 및 상세 사유 조립 ──
     let isAnomaly = false;
     let anomalyDetail = '정상 위치 접근';
-
     if (user.lastCountry && user.lastCountry !== 'UNKNOWN' && currentCountry !== 'UNKNOWN') {
       if (user.lastCountry !== currentCountry) {
         isAnomaly = true;
@@ -137,7 +123,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── LOW: 이상 접근이어도 ID/PW만 맞으면 통과 ──
+    // ── LOW ──
     if (user.profile === 'LOW') {
       await prisma.accessLog.create({
         data: {
@@ -148,22 +134,17 @@ export async function POST(req: NextRequest) {
           reason: `[LOW] ${isAnomaly ? `${anomalyDetail} (프로파일 정책상 통과)` : '정상 로그인'}`,
         },
       });
-      if (isAnomaly) {
-        await publishAnomaly(user, clientIp, anomalyDetail, 'LOW');
-      }
+      if (isAnomaly) await publishAnomaly(user, clientIp, anomalyDetail, 'LOW');
       await prisma.user.update({ where: { id: user.id }, data: { lastCountry: currentCountry } });
       return await issueLoginResponse(user, clientIp, 'LOW', isAnomaly);
     }
 
-    // ── HIGH: 이상 여부 무관하게 무조건 OTP 요구 ──
+    // ── HIGH ──
     if (user.profile === 'HIGH') {
       if (!user.mfaSecret) {
         await prisma.accessLog.create({
           data: {
-            userId: user.id,
-            ipAddress: clientIp,
-            action: 'LOGIN_BLOCKED',
-            isAnomaly,
+            userId: user.id, ipAddress: clientIp, action: 'LOGIN_BLOCKED', isAnomaly,
             reason: `[HIGH] OTP 미등록으로 로그인 불가 (${anomalyDetail})`,
           },
         });
@@ -174,16 +155,11 @@ export async function POST(req: NextRequest) {
       }
       await prisma.accessLog.create({
         data: {
-          userId: user.id,
-          ipAddress: clientIp,
-          action: 'LOGIN_OTP_REQUIRED',
-          isAnomaly,
+          userId: user.id, ipAddress: clientIp, action: 'LOGIN_OTP_REQUIRED', isAnomaly,
           reason: `[HIGH] ID/PW 통과, OTP 검증 대기 (${anomalyDetail})`,
         },
       });
-      if (isAnomaly) {
-        await publishAnomaly(user, clientIp, anomalyDetail, 'HIGH');
-      }
+      if (isAnomaly) await publishAnomaly(user, clientIp, anomalyDetail, 'HIGH');
       return NextResponse.json(
         { message: 'OTP 인증이 필요합니다.', requireOtp: true, trustLevel: 'HIGH', userId: user.id },
         { status: 200 }
@@ -199,16 +175,12 @@ export async function POST(req: NextRequest) {
       return await issueLoginResponse(user, clientIp, 'ZERO_TRUST', isAnomaly);
     }
 
-    // ZERO_TRUST + 이상 접근 감지 시
     await publishAnomaly(user, clientIp, `ZERO_TRUST ${anomalyDetail}`, 'ZERO_TRUST');
 
     if (user.mfaSecret) {
       await prisma.accessLog.create({
         data: {
-          userId: user.id,
-          ipAddress: clientIp,
-          action: 'LOGIN_OTP_REQUIRED',
-          isAnomaly,
+          userId: user.id, ipAddress: clientIp, action: 'LOGIN_OTP_REQUIRED', isAnomaly,
           reason: `[ZERO_TRUST] ${anomalyDetail} -> OTP 요구`,
         },
       });
@@ -218,13 +190,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // OTP 미등록 + 이상 접근 → 관리자 승인 대기 차단
     await prisma.accessLog.create({
       data: {
-        userId: user.id,
-        ipAddress: clientIp,
-        action: 'LOGIN_BLOCKED',
-        isAnomaly,
+        userId: user.id, ipAddress: clientIp, action: 'LOGIN_BLOCKED', isAnomaly,
         reason: `[ZERO_TRUST] ${anomalyDetail} + OTP 미등록 -> 관리자 승인 대기`,
       },
     });
