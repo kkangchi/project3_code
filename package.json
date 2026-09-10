@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "sync:spamhaus": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/sync-spamhaus.ts"
   },
   "dependencies": {
     "@aws-sdk/client-ec2": "^3.1121.0",
@@ -39,10 +40,5 @@
   },
   "prisma": {
     "seed": "npx ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"
-  },
-  "scripts": {
-  "sync:spamhaus": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/sync-spamhaus.ts"
-}
-
-  
+  }
 }
