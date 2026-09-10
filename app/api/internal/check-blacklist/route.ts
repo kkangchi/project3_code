@@ -25,8 +25,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ isBlacklisted: false, isCountryBlocked: false });
   }
 
-  // 1. 블랙리스트 확인 — 낱개 IP + CIDR 대역(Spamhaus) 둘 다 대응, 만료 안 된 것만
-  // any 타입 대신 Prisma 모델 직접 참조
+  // 1. 블랙리스트 확인 — 낱개 IP + CIDR 대역(Spamhaus) 대응
   const activeEntries = await prisma.blacklist.findMany({
     where: {
       OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
@@ -35,11 +34,11 @@ export async function GET(req: NextRequest) {
   });
 
   const matched = activeEntries.find((entry) => {
-    // 낱개 IP 완전 일치 또는 CIDR 대역 포함 여부
-    if (entry.ipAddress === ip) return true;
-    if (entry.ipAddress.includes('/')) {
+    const targetIp = entry.ipAddress.trim();
+    if (targetIp === ip) return true;
+    if (targetIp.includes('/')) {
       try {
-        return ipRangeCheck(ip, entry.ipAddress);
+        return ipRangeCheck(ip, targetIp);
       } catch {
         return false;
       }
