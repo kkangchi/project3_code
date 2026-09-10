@@ -11,13 +11,14 @@ export async function middleware(req: NextRequest) {
 
   try {
     const checkRes = await fetch(`${req.nextUrl.origin}/api/internal/check-blacklist?ip=${clientIp}`);
-    const { isBlacklisted } = await checkRes.json();
+    const { isBlacklisted, isCountryBlocked, reason } = await checkRes.json();
 
     if (isBlacklisted) {
-      return NextResponse.json(
-        { error: '차단된 IP입니다.' },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: '차단된 IP입니다.', reason }, { status: 403 });
+    }
+
+    if (isCountryBlocked) {
+      return NextResponse.json({ error: '차단된 국가에서의 접근입니다.', reason }, { status: 403 });
     }
   } catch (error) {
     console.error('Blacklist check error:', error);
