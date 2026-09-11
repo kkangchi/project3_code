@@ -1,8 +1,14 @@
+import path from "path";
+import dotenv from "dotenv";
+// .env 환경변수를 최상단에서 직접 로드합니다. *모듈의 동작 규칙 때문
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
+
 import { Server as HttpServer } from "http";
 import { Server as SocketIOServer, Socket } from "socket.io";
 import Redis from "ioredis";
 
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+console.log(`[DEBUG] REDIS_URL 값 확인: "${REDIS_URL}"`);
 
 // Redis Subscriber 인스턴스 생성
 const redisSub = new Redis(REDIS_URL);
