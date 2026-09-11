@@ -1,3 +1,7 @@
+import path from 'path';
+import dotenv from 'dotenv';
+dotenv.config({ path: path.resolve(__dirname, '.env') });
+
 import { createServer } from 'http';
 import next from 'next';
 import { initSocketServer } from './lib/socket';
