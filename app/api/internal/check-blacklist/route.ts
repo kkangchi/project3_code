@@ -47,12 +47,16 @@ export async function GET(req: NextRequest) {
   });
 
   if (matched) {
+    // Wazuh Rule 100500 (R-05) 탐지용 표준 로그 출력
+    console.log(`ZERO_WATCH event=blacklist_reconnect srcip=${ip}`);
     return NextResponse.json({ isBlacklisted: true, isCountryBlocked: false, reason: matched.reason });
   }
 
   // 2. 국가 차단 확인
   const country = await getCountryByIp(ip);
   if (BLOCKED_COUNTRIES.includes(country)) {
+    // 국가 차단도 접속 재시도 탐지용 로그 출력
+    console.log(`ZERO_WATCH event=blacklist_reconnect srcip=${ip}`);
     return NextResponse.json({
       isBlacklisted: false,
       isCountryBlocked: true,
