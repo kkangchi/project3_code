@@ -33,7 +33,8 @@ export function initSocketServer(server: HttpServer) {
       const parsedData = JSON.parse(message);
       io.emit(channel, parsedData);
       console.log(`[Socket.io] Broadcasted event '${channel}':`, parsedData);
-    } catch (e) {
+    } catch (parseError) {
+      console.error(`[Socket.io] JSON parse failed for channel '${channel}':`, parseError);
       io.emit(channel, message);
       console.log(`[Socket.io] Broadcasted raw event '${channel}':`, message);
     }
