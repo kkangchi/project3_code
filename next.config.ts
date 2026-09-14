@@ -5,15 +5,14 @@ const nextConfig: NextConfig = {
     // 배포 환경 Prisma 버전 불일치로 인한 타입체크 에러 우회
     ignoreBuildErrors: true,
   },
-  // ALB/프록시 환경 및 Socket.io 끝자리 슬래시(/) 308 리다이렉트 방지
-  trailingSlash: false,
+  // Next.js의 자동 트레일링 슬래시 308 리다이렉트 기능 완전 비활성화
   skipTrailingSlashRedirect: true,
 
   async headers() {
     return [
       {
-        // 모든 경로에 CORS 헤더 강제 주입
-        source: "/:path*",
+        // /socket.io 경로를 제외한 일반 Next.js API 및 페이지에만 CORS 헤더 적용
+        source: "/((?!socket\\.io).*)",
         headers: [
           { key: "Access-Control-Allow-Credentials", value: "true" },
           { key: "Access-Control-Allow-Origin", value: "http://localhost:3001" },
