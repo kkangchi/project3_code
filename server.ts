@@ -45,23 +45,28 @@ app.prepare().then(() => {
       return;
     }
 
-    // 4. 일반 Next.js 핸들러 전달
+    // 4. [핵심] Socket.io 요청은 Next.js 핸들러(308 리다이렉트 발생 주범)로 안 넘어가게 바로 종료
+    if (req.url && req.url.startsWith('/socket.io')) {
+      return;
+    }
+
+    // 5. 일반 REST API 및 Next.js 페이지 요청만 전달
     handle(req, res);
   });
 
-// [CRITICAL] Socket.io 및 다른 모든 라우터보다 먼저 req.url을 가로채서 정규화
-httpServer.prependListener('request', (req, _res) => {
-  void _res; // 미사용 변수 경고 방지
-  if (req.url) {
-    if (req.url.startsWith('/socket.io/')) {
-      req.url = '/socket.io' + req.url.slice(10);
-    } else if (req.url === '/socket.io/') {
-      req.url = '/socket.io';
+  // Socket.io 및 Engine.IO 경로 정규화 (가장 앞순위 실행)
+  httpServer.prependListener('request', (req, _res) => {
+    void _res;
+    if (req.url) {
+      if (req.url.startsWith('/socket.io/')) {
+        req.url = '/socket.io' + req.url.slice(10);
+      } else if (req.url === '/socket.io/') {
+        req.url = '/socket.io';
+      }
     }
-  }
-});
+  });
 
-  // Socket.io 서버 초기화 및 HTTP 서버 바인딩
+  // Socket.io 서버 바인딩
   initSocketServer(httpServer);
 
   httpServer.listen(port, () => {
