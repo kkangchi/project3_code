@@ -5,7 +5,8 @@ const nextConfig: NextConfig = {
     // 배포 환경 Prisma 버전 불일치로 인한 타입체크 에러 우회
     ignoreBuildErrors: true,
   },
-  // Socket.io 끝자리 슬래시(/) 308 리다이렉트 방지
+  // ALB/프록시 환경 및 Socket.io 끝자리 슬래시(/) 308 리다이렉트 방지
+  trailingSlash: false,
   skipTrailingSlashRedirect: true,
 
   async headers() {
