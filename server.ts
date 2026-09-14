@@ -22,6 +22,12 @@ app.prepare().then(() => {
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    } else {
+      // Origin 헤더가 없는 요청(curl 테스트 등)에서도 CORS 기본 허용 헤더 제공
+      res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3001');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
     }
 
     // 2. [OPTIONS Preflight 처리] 브라우저 Preflight 요청은 인증/라우터 진입 전 즉시 204 응답
@@ -31,7 +37,13 @@ app.prepare().then(() => {
       return;
     }
 
-    // 3. 그 외 실제 요청(GET, POST 등)만 Next.js 요청 핸들러로 전달
+    // 3. [Socket.io 308 Permanent Redirect 방지]
+    // Next.js 라우터가 /socket.io/ 뒤의 슬래시 때문에 308 리다이렉트를 시키는 것 방지
+    if (req.url && req.url.startsWith('/socket.io/')) {
+      req.url = req.url.replace('/socket.io/', '/socket.io');
+    }
+
+    // 4. 그 외 실제 요청(GET, POST 등)만 Next.js 요청 핸들러로 전달
     handle(req, res);
   });
 
