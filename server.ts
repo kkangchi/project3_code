@@ -8,7 +8,11 @@ import { initSocketServer } from './lib/socket';
 
 const dev = process.env.NODE_ENV !== 'production';
 
-const app = next({ dev, hostname: '0.0.0.0', port: process.env.PORT ? parseInt(process.env.PORT) : 3000 });
+const app = next({
+  dev,
+  hostname: '0.0.0.0',
+  port: process.env.PORT ? parseInt(process.env.PORT) : 3000,
+});
 const handle = app.getRequestHandler();
 const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
@@ -22,7 +26,12 @@ app.prepare().then(() => {
       req.headers['host'] = req.headers['x-forwarded-host'] as string;
     }
 
-    // 2. CORS 헤더 설정
+    // 2. Socket.io 요청은 Next.js 라우터(handle)로 넘기지 않고 Socket.io 핸들러가 처리하도록 바이패스
+    if (req.url && req.url.startsWith('/socket.io')) {
+      return;
+    }
+
+    // 3. CORS 헤더 설정 (Next.js 페이지 및 REST API용)
     const origin = req.headers.origin;
     const allowedOrigins = ['http://localhost:3001', 'http://localhost:3000'];
 
@@ -38,23 +47,18 @@ app.prepare().then(() => {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
     }
 
-    // 3. OPTIONS Preflight 처리
+    // 4. OPTIONS Preflight 처리
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
       return;
     }
 
-    // 4. [핵심] Socket.io 요청은 Next.js 핸들러(308 리다이렉트 발생 주범)로 안 넘어가게 바로 종료
-    if (req.url && req.url.startsWith('/socket.io')) {
-      return;
-    }
-
-    // 5. 일반 REST API 및 Next.js 페이지 요청만 전달
+    // 5. 일반 REST API 및 Next.js 페이지 요청만 Next.js 핸들러로 전달
     handle(req, res);
   });
 
-  // Socket.io 및 Engine.IO 경로 정규화 (가장 앞순위 실행)
+  // Socket.io 및 Engine.IO 경로 정규화 (최우선 실행: /socket.io/ -> /socket.io 변환으로 308 방지)
   httpServer.prependListener('request', (req, _res) => {
     void _res;
     if (req.url) {
