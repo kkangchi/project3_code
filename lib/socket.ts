@@ -1,6 +1,6 @@
 import path from "path";
 import dotenv from "dotenv";
-// .env 환경변수를 최상단에서 직접 로드합니다. *모듈의 동작 규칙 때문
+// .env 환경변수를 최상단에서 직접 로드합니다.
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 import { Server as HttpServer } from "http";
@@ -19,8 +19,12 @@ const CHANNELS = ["login:success", "login:anomaly", "session:killed"];
 export function initSocketServer(server: HttpServer) {
   const io = new SocketIOServer(server, {
     cors: {
-      origin: "*",
+      origin: [
+        "http://localhost:3001", // 대시보드 로컬 개발 환경
+        "http://localhost:3000",
+      ],
       methods: ["GET", "POST"],
+      credentials: true, // withCredentials: true 허용
     },
   });
 
