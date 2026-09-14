@@ -46,13 +46,15 @@ app.prepare().then(() => {
       return;
     }
 
-    // 4. [Socket.io 및 Trailing Slash 308 Redirect 방지]
+    // 4. [Socket.io 및 Trailing Slash 308 Redirect 방지 정밀 보정]
     if (req.url) {
+      // /socket.io/?EIO=4... 처럼 /socket.io/ 뒤에 쿼리스트링이나 슬래시가 붙는 경우 정규화
       if (req.url.startsWith('/socket.io/')) {
-        req.url = req.url.replace('/socket.io/', '/socket.io');
-      }
-      // 끝에 불필요한 슬래시가 붙어 Next.js 내부에서 308 리다이렉트가 발생하는 경우 방지
-      if (req.url.length > 1 && req.url.endsWith('/') && !req.url.startsWith('/_next/')) {
+        req.url = '/socket.io' + req.url.slice(10); // '/socket.io/' 이후 문자열(?EIO=4...)을 그대로 유지
+      } else if (req.url === '/socket.io/') {
+        req.url = '/socket.io';
+      } else if (req.url.length > 1 && req.url.endsWith('/') && !req.url.startsWith('/_next/')) {
+        // 일반 Next.js 경로의 trailing slash 제거
         req.url = req.url.slice(0, -1);
       }
     }
