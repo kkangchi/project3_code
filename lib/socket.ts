@@ -18,10 +18,11 @@ const CHANNELS = ["login:success", "login:anomaly", "session:killed"];
 
 export function initSocketServer(server: HttpServer) {
   const io = new SocketIOServer(server, {
+    path: "/socket.io/", // 경로 끝 슬래시 명시 (ALB 경유 시 308 리다이렉트 방지)
     cors: {
       origin: [
-        "http://localhost:3001", // 대시보드 로컬 개발 환경
-        "http://localhost:3000",
+        "http://localhost:3001", // 웹메일 로컬 개발 환경
+        "http://localhost:3000", // 대시보드 로컬 개발 환경
       ],
       methods: ["GET", "POST"],
       credentials: true, // withCredentials: true 허용
