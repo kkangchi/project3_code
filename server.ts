@@ -31,22 +31,24 @@ app.prepare().then(() => {
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
 
-    // 2. OPTIONS Preflight 처리
+    // 2. OPTIONS Preflight 빠른 응답
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
       return;
     }
 
-    // 3. Socket.io 요청은 Next.js handle()로 넘기지 않고 우회
+    // 3. Socket.io 요청 경로 분기
+    // Socket.io 엔진이 자체적으로 req, res를 처리하므로 Next.js handle()로 라우팅되지 않게 우회합니다.
     if (req.url && req.url.startsWith('/socket.io')) {
       return;
     }
 
-    // 4. 일반 요청만 Next.js 라우터 처리
+    // 4. 일반 웹 요청만 Next.js 라우터로 전달
     handle(req, res);
   });
 
+  // Socket.io 서버 초기화 (httpServer의 request/upgrade 이벤트를 가로챔)
   initSocketServer(httpServer);
 
   httpServer.listen(port, () => {

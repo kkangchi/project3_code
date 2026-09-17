@@ -5,8 +5,10 @@ const nextConfig: NextConfig = {
     // 배포 환경 Prisma 버전 불일치로 인한 타입체크 에러 우회
     ignoreBuildErrors: true,
   },
+  
   // Next.js의 자동 트레일링 슬래시 308 리다이렉트 기능 완전 비활성화
   skipTrailingSlashRedirect: true,
+  trailingSlash: false,
 
   async headers() {
     return [
