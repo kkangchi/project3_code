@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function middleware(req: NextRequest) {
-  // 내부 검증 API 호출 자체는 미들웨어 검사 스킵 (무한 재호출 방지)
-  if (req.nextUrl.pathname.startsWith('/api/internal/')) {
+  // Socket.io 통신 및 내부 검증 API 호출은 미들웨어 검사 스킵 (무한 재호출 및 400 에러 방지)
+  if (
+    req.nextUrl.pathname.startsWith('/socket.io') ||
+    req.nextUrl.pathname.startsWith('/api/internal/')
+  ) {
     return NextResponse.next();
   }
 
