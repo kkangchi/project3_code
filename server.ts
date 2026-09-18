@@ -20,13 +20,17 @@ app.prepare().then(() => {
   const httpServer = createServer((req, res) => {
     // 1. CORS 기본 헤더 설정
     const origin = req.headers.origin;
-    const allowedOrigins = ['http://localhost:3001', 'http://localhost:3000'];
+    const allowedOrigins = ['http://localhost:3000', 'http://localhost:3001'];
 
     if (origin && allowedOrigins.includes(origin as string)) {
       res.setHeader('Access-Control-Allow-Origin', origin as string);
+    } else if (origin) {
+      // 요청받은 Origin이 허용 목록에 없더라도 요청한 origin을 그대로 반영하거나 지정
+      res.setHeader('Access-Control-Allow-Origin', origin as string);
     } else {
-      res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3001');
+      res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
     }
+
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
@@ -38,8 +42,7 @@ app.prepare().then(() => {
       return;
     }
 
-    // 3. Socket.io 요청 경로 분기
-    // Socket.io 엔진이 자체적으로 req, res를 처리하므로 Next.js handle()로 라우팅되지 않게 우회합니다.
+    // 3. Socket.io 요청 경로 분기 (CORS 헤더가 적용된 후 Socket.io로 넘어가도록 처리)
     if (req.url && req.url.startsWith('/socket.io')) {
       return;
     }
@@ -48,7 +51,7 @@ app.prepare().then(() => {
     handle(req, res);
   });
 
-  // Socket.io 서버 초기화 (httpServer의 request/upgrade 이벤트를 가로챔)
+  // Socket.io 서버 초기화
   initSocketServer(httpServer);
 
   httpServer.listen(port, () => {

@@ -1,6 +1,5 @@
 import path from "path";
 import dotenv from "dotenv";
-// .env 환경변수를 최상단에서 직접 로드합니다.
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 import { Server as HttpServer } from "http";
@@ -10,7 +9,6 @@ import Redis from "ioredis";
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 console.log(`[DEBUG] REDIS_URL 값 확인: "${REDIS_URL}"`);
 
-// Redis Subscriber 인스턴스 생성
 const redisSub = new Redis(REDIS_URL);
 
 // 대시보드 전달용 구독 채널 목록
@@ -18,14 +16,18 @@ const CHANNELS = ["login:success", "login:anomaly", "session:killed"];
 
 export function initSocketServer(server: HttpServer) {
   const io = new SocketIOServer(server, {
-    path: "/socket.io/", // 경로 끝 슬래시 명시 (ALB 경유 시 308 리다이렉트 방지)
+    path: "/socket.io", // 슬래시(/) 제거: 표준 Socket.io path 규격
     cors: {
-      origin: [
-        "http://localhost:3001", // 웹메일 로컬 개발 환경
-        "http://localhost:3000", // 대시보드 로컬 개발 환경
-      ],
+      origin: (origin, callback) => {
+        const allowedOrigins = ["http://localhost:3000", "http://localhost:3001"];
+        if (!origin || allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(null, true); // 개발 환경 편의를 위한 전체 허용
+        }
+      },
       methods: ["GET", "POST"],
-      credentials: true, // withCredentials: true 허용
+      credentials: true,
     },
   });
 
@@ -47,7 +49,6 @@ export function initSocketServer(server: HttpServer) {
     } catch (parseError) {
       console.error(`[Socket.io] JSON parse failed for channel '${channel}':`, parseError);
       io.emit(channel, message);
-      console.log(`[Socket.io] Broadcasted raw event '${channel}':`, message);
     }
   });
 
