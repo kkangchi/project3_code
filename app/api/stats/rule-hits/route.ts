@@ -1,3 +1,6 @@
+// 아래는 임시 목업 데이터이며 사용X 
+//  (>이 부분 실제 데이터는 서지영 연동)
+
 import { NextResponse } from 'next/server';
 
 export async function GET(){
