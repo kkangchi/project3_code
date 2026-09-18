@@ -15,15 +15,21 @@ const redisSub = new Redis(REDIS_URL);
 const CHANNELS = ["login:success", "login:anomaly", "session:killed"];
 
 export function initSocketServer(server: HttpServer) {
+  // .env의 ALLOWED_ORIGINS 목록을 가져옵니다. (없으면 기본값 사용)
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+    : ["http://localhost:3000", "http://localhost:3001"];
+
   const io = new SocketIOServer(server, {
-    path: "/socket.io", // 슬래시(/) 제거: 표준 Socket.io path 규격
+    path: "/socket.io",
     cors: {
       origin: (origin, callback) => {
-        const allowedOrigins = ["http://localhost:3000", "http://localhost:3001"];
+        // origin이 없는 경우(동일 출처 또는 Server-to-Server)나 허용 목록에 있는 경우 허용
         if (!origin || allowedOrigins.includes(origin)) {
           callback(null, true);
         } else {
-          callback(null, true); // 개발 환경 편의를 위한 전체 허용
+          // ALB/개발 환경 편의를 위해 다른 origin 요청도 허용 처리
+          callback(null, true);
         }
       },
       methods: ["GET", "POST"],

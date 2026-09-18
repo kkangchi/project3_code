@@ -18,40 +18,38 @@ const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => {
-    // 1. CORS 기본 헤더 설정
     const origin = req.headers.origin;
-    const allowedOrigins = ['http://localhost:3000', 'http://localhost:3001'];
+    
+    // .env의 ALLOWED_ORIGINS 가져오기
+    const allowedOrigins = process.env.ALLOWED_ORIGINS
+      ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
+      : ['http://localhost:3000', 'http://localhost:3001'];
 
-    if (origin && allowedOrigins.includes(origin as string)) {
-      res.setHeader('Access-Control-Allow-Origin', origin as string);
+    // 1. Dynamic CORS 헤더 처리
+    if (origin && allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
     } else if (origin) {
-      // 요청받은 Origin이 허용 목록에 없더라도 요청한 origin을 그대로 반영하거나 지정
-      res.setHeader('Access-Control-Allow-Origin', origin as string);
+      res.setHeader('Access-Control-Allow-Origin', origin);
     } else {
-      res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
+      res.setHeader('Access-Control-Allow-Origin', allowedOrigins[0] || 'http://localhost:3000');
     }
 
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
 
-    // 2. OPTIONS Preflight 빠른 응답
+    // 2. Preflight(OPTIONS) 요청 즉시 응답
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
       return;
     }
 
-    // 3. Socket.io 요청 경로 분기 (CORS 헤더가 적용된 후 Socket.io로 넘어가도록 처리)
-    if (req.url && req.url.startsWith('/socket.io')) {
-      return;
-    }
-
-    // 4. 일반 웹 요청만 Next.js 라우터로 전달
+    // 3. 요청을 Next.js 핸들러로 전달 (Socket.io Engine이 HTTP 서버 레벨에서 가로채어 처리함)
     handle(req, res);
   });
 
-  // Socket.io 서버 초기화
+  // Socket.io 서버 초기화 및 HTTP 서버 바인딩
   initSocketServer(httpServer);
 
   httpServer.listen(port, () => {
