@@ -9,10 +9,59 @@ import Redis from "ioredis";
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 console.log(`[DEBUG] REDIS_URL 값 확인: "${REDIS_URL}"`);
 
-const redisSub = new Redis(REDIS_URL);
+const redisSub = new Redis(REDIS_URL, {
+  retryStrategy(times) {
+    const delay = Math.min(times * 50, 2000);
+    return delay;
+  },
+});
 
-// 대시보드 전달용 구독 채널 목록
-const CHANNELS = ["login:success", "login:anomaly", "session:killed"];
+redisSub.on("connect", () => {
+  console.log("[Redis Sub] Connected to Redis successfully.");
+});
+
+redisSub.on("error", (err) => {
+  console.error("[Redis Sub Error]:", err);
+});
+
+// GuardDuty 위치 정보(GeoIP) Fallback 및 파싱 함수 (unknown 및 타입 가드 적용으로 any 경고 완벽 제거)
+function parseGuardDutyLocation(finding: Record<string, unknown>) {
+  try {
+    const service = finding.service as Record<string, unknown> | undefined;
+    const action = service?.action as Record<string, unknown> | undefined;
+    
+    const networkConnectionAction = action?.networkConnectionAction as Record<string, unknown> | undefined;
+    const awsApiCallAction = action?.awsApiCallAction as Record<string, unknown> | undefined;
+    
+    const remoteIpDetails = (networkConnectionAction?.remoteIpDetails || awsApiCallAction?.remoteIpDetails) as Record<string, unknown> | undefined;
+    const geoLocation = remoteIpDetails?.geoLocation as Record<string, unknown> | undefined;
+    const country = remoteIpDetails?.country as Record<string, unknown> | undefined;
+
+    if (remoteIpDetails && geoLocation) {
+      return {
+        ip: (remoteIpDetails.ipAddressV4 as string) || (remoteIpDetails.ipAddressV6 as string) || "Unknown IP",
+        lat: geoLocation.lat as number,
+        lon: geoLocation.lon as number,
+        country: (country?.countryName as string) || "Unknown Country",
+        isInternal: false,
+      };
+    }
+  } catch (err) {
+    console.error("[GuardDuty Location Parse Error]:", err);
+  }
+
+  // IP/위치 정보가 없거나 파싱 오류 발생 시 서울/IDC 기본 좌표로 Fallback
+  return {
+    ip: "AWS Internal",
+    lat: 37.5665,
+    lon: 126.9780,
+    country: "AWS Internal Resource",
+    isInternal: true,
+  };
+}
+
+// 대시보드 전달용 구독 채널 목록 (GuardDuty 채널 포함)
+const CHANNELS = ["login:success", "login:anomaly", "session:killed", "guardduty:finding"];
 
 export function initSocketServer(server: HttpServer) {
   // .env의 ALLOWED_ORIGINS 목록을 가져옵니다. (없으면 기본값 사용)
@@ -24,11 +73,9 @@ export function initSocketServer(server: HttpServer) {
     path: "/socket.io",
     cors: {
       origin: (origin, callback) => {
-        // origin이 없는 경우(동일 출처 또는 Server-to-Server)나 허용 목록에 있는 경우 허용
         if (!origin || allowedOrigins.includes(origin)) {
           callback(null, true);
         } else {
-          // ALB/개발 환경 편의를 위해 다른 origin 요청도 허용 처리
           callback(null, true);
         }
       },
@@ -50,6 +97,25 @@ export function initSocketServer(server: HttpServer) {
   redisSub.on("message", (channel: string, message: string) => {
     try {
       const parsedData = JSON.parse(message);
+
+      // GuardDuty 이벤트인 경우 파싱 후 프론트엔드 표준 스키마(event:security-alert)로 전파
+      if (channel === "guardduty:finding") {
+        const normalizedAlert = {
+          id: parsedData.id || `gd-${Date.now()}`,
+          source: "GUARD_DUTY",
+          title: parsedData.title || "GuardDuty Security Finding",
+          severity: parsedData.severity ?? "Medium",
+          region: parsedData.region || "ap-northeast-2",
+          location: parseGuardDutyLocation(parsedData as Record<string, unknown>),
+          timestamp: parsedData.updatedAt || new Date().toISOString(),
+        };
+
+        io.emit("event:security-alert", normalizedAlert);
+        console.log(`[Socket.io] Broadcasted event 'event:security-alert':`, normalizedAlert);
+        return;
+      }
+
+      // 기존 로그인 및 세션 관련 이벤트 브로드캐스트
       io.emit(channel, parsedData);
       console.log(`[Socket.io] Broadcasted event '${channel}':`, parsedData);
     } catch (parseError) {
