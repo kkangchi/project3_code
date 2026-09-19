@@ -24,7 +24,7 @@ redisSub.on("error", (err) => {
   console.error("[Redis Sub Error]:", err);
 });
 
-// GuardDuty 위치 정보(GeoIP) Fallback 및 파싱 함수 (unknown 및 타입 가드 적용으로 any 경고 완벽 제거)
+// GuardDuty 위치 정보(GeoIP) Fallback 및 파싱 함수
 function parseGuardDutyLocation(finding: Record<string, unknown>) {
   try {
     const service = finding.service as Record<string, unknown> | undefined;
@@ -71,6 +71,11 @@ export function initSocketServer(server: HttpServer) {
 
   const io = new SocketIOServer(server, {
     path: "/socket.io",
+    // ALB 504 Gateway Timeout 방지를 위해 WebSocket을 우선 및 필수 허용
+    transports: ["websocket", "polling"],
+    // ALB 연결 유지 인터벌 및 타임아웃 튜닝 (60초 타임아웃 도달 전에 핑/퐁)
+    pingTimeout: 20000,
+    pingInterval: 25000,
     cors: {
       origin: (origin, callback) => {
         if (!origin || allowedOrigins.includes(origin)) {
