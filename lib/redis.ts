@@ -1,16 +1,17 @@
 import Redis from 'ioredis';
 
-const redisConfig = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: Number(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD,
-};
+// .env에 설정된 REDIS_URL을 우선 사용하고, 없을 경우에만 기본값 사용
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
 // 메인 Redis 클라이언트
-export const redis = new Redis(redisConfig);
+export const redis = new Redis(REDIS_URL);
 
 // Pub/Sub 전용 Redis 클라이언트 (이벤트 발행용)
-export const redisPub = new Redis(redisConfig);
+export const redisPub = new Redis(REDIS_URL);
+
+// Redis 접속 에러 핸들러 (unhandled error 방지)
+redis.on('error', (err) => console.error('[Redis Error]:', err));
+redisPub.on('error', (err) => console.error('[Redis Pub Error]:', err));
 
 // sessionId만으로 세션 조회 가능한 키 구조
 export const getSessionKey = (sessionId: string) => `session:${sessionId}`;
