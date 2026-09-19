@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { BLOCKED_COUNTRIES } from '@/lib/blockedCountries';
+import { getCountryByIpCached } from '@/lib/geoCache';
+import ipRangeCheck from 'ip-range-check';
+
+export const config = {
+  // /api/stats/* 등 통계 조회 API는 국가/블랙리스트 체크 대상에서 제외
+  matcher: ['/api/auth/:path*', '/api/session/:path*', '/api/sessions'],
+  runtime: 'nodejs',
+};
 
 export async function middleware(req: NextRequest) {
   const origin = req.headers.get('origin');
-
-  // 1. .env 환경변수 또는 기본 허용 Origin 목록 구성
   const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
     : ['http://localhost:3000', 'http://localhost:3001'];
 
-  // 요청 온 Origin이 허용 목록에 있으면 헤더 세팅, 없으면 기본값
   const isAllowedOrigin = origin && allowedOrigins.includes(origin);
   const corsOrigin = isAllowedOrigin ? origin : allowedOrigins[0];
 
@@ -20,46 +27,55 @@ export async function middleware(req: NextRequest) {
       'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization',
   };
 
-  // 2. Preflight(OPTIONS) 요청 시 검사 스킵 및 CORS 응답 반환
   if (req.method === 'OPTIONS') {
-    return new NextResponse(null, {
-      status: 200,
-      headers: corsHeaders,
-    });
+    return new NextResponse(null, { status: 200, headers: corsHeaders });
   }
 
-  // 3. Socket.io 및 내부 API 검사는 미들웨어 로직 스킵
   if (
     req.nextUrl.pathname.startsWith('/socket.io') ||
     req.nextUrl.pathname.startsWith('/api/internal/')
   ) {
     const response = NextResponse.next();
-    Object.entries(corsHeaders).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    Object.entries(corsHeaders).forEach(([key, value]) => response.headers.set(key, value));
     return response;
   }
 
-  // 4. IP 차단 및 국가 차단 검사
   const forwardedFor = req.headers.get('x-forwarded-for');
   const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : '127.0.0.1';
 
   try {
-    const checkRes = await fetch(
-      `${req.nextUrl.origin}/api/internal/check-blacklist?ip=${clientIp}`
-    );
-    const { isBlacklisted, isCountryBlocked, reason } = await checkRes.json();
+    const activeEntries = await prisma.blacklist.findMany({
+      where: { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+      select: { ipAddress: true, reason: true },
+    });
 
-    if (isBlacklisted) {
+    const matched = activeEntries.find((entry) => {
+      const targetIp = entry.ipAddress.trim();
+      if (targetIp === clientIp) return true;
+      if (targetIp.includes('/')) {
+        try {
+          return ipRangeCheck(clientIp, targetIp);
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    });
+
+    if (matched) {
+      console.log(`ZERO_WATCH event=blacklist_reconnect srcip=${clientIp}`);
       return NextResponse.json(
-        { error: '차단된 IP입니다.', reason },
+        { error: '차단된 IP입니다.', reason: matched.reason },
         { status: 403, headers: corsHeaders }
       );
     }
 
-    if (isCountryBlocked) {
+    // 캐싱된 국가 조회 함수 사용 (같은 IP는 1시간 동안 재조회 안 함)
+    const country = await getCountryByIpCached(clientIp);
+    if (BLOCKED_COUNTRIES.includes(country)) {
+      console.log(`ZERO_WATCH event=blacklist_reconnect srcip=${clientIp}`);
       return NextResponse.json(
-        { error: '차단된 국가에서의 접근입니다.', reason },
+        { error: '차단된 국가에서의 접근입니다.', reason: `차단 국가(${country})에서의 접근` },
         { status: 403, headers: corsHeaders }
       );
     }
@@ -67,15 +83,7 @@ export async function middleware(req: NextRequest) {
     console.error('Blacklist check error:', error);
   }
 
-  // 5. 모든 검과 통과 시 CORS 헤더 포함하여 통과
   const response = NextResponse.next();
-  Object.entries(corsHeaders).forEach(([key, value]) => {
-    response.headers.set(key, value);
-  });
-
+  Object.entries(corsHeaders).forEach(([key, value]) => response.headers.set(key, value));
   return response;
 }
-
-export const config = {
-  matcher: ['/api/:path*'],
-};
