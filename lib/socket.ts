@@ -71,9 +71,10 @@ export function initSocketServer(server: HttpServer) {
 
   const io = new SocketIOServer(server, {
     path: "/socket.io",
-    // ALB 504 Gateway Timeout 방지를 위해 WebSocket을 우선 및 필수 허용
-    transports: ["websocket", "polling"],
-    // ALB 연결 유지 인터벌 및 타임아웃 튜닝 (60초 타임아웃 도달 전에 핑/퐁)
+    // ALB 504 Gateway Timeout 차단을 위해 WebSocket 연결만 강제 허용
+    transports: ["websocket"],
+    allowUpgrades: false, // Polling -> WebSocket 업그레이드 차단
+    // ALB 연결 유지 인터벌 및 타임아웃 튜닝
     pingTimeout: 20000,
     pingInterval: 25000,
     cors: {
