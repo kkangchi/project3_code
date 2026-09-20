@@ -82,7 +82,8 @@ export function initSocketServer(server: HttpServer) {
         if (!origin || allowedOrigins.includes(origin)) {
           callback(null, true);
         } else {
-          callback(null, true);
+          // CORS 허용되지 않은 Origin 차단 (보안 버그 수정)
+          callback(new Error("Not allowed by CORS"), false);
         }
       },
       methods: ["GET", "POST"],
