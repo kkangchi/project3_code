@@ -71,9 +71,9 @@ export function initSocketServer(server: HttpServer) {
 
   const io = new SocketIOServer(server, {
     path: "/socket.io",
-    // Polling 및 WebSocket 둘 다 허용 (Polling으로 먼저 세션 연결 후 WebSocket 업그레이드)
-    transports: ["polling", "websocket"],
-    allowUpgrades: true,
+    // 💡 Polling을 제거하고 WebSocket 단독으로 설정 (HTTP 핸드셰이크 타임아웃 방지)
+    transports: ["websocket"],
+    allowUpgrades: false,
     // ALB 연결 유지 인터벌 및 타임아웃 튜닝
     pingTimeout: 20000,
     pingInterval: 25000,
@@ -82,7 +82,7 @@ export function initSocketServer(server: HttpServer) {
         if (!origin || allowedOrigins.includes(origin)) {
           callback(null, true);
         } else {
-          // CORS 허용되지 않은 Origin 차단 (보안 버그 수정)
+          // CORS 허용되지 않은 Origin 차단
           callback(new Error("Not allowed by CORS"), false);
         }
       },
