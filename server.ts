@@ -79,11 +79,19 @@ export function initSocketServer(server: HttpServer) {
     pingInterval: 25000,
     cors: {
       origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
-          callback(null, true);
-        } else {
-          callback(null, true); // 로컬 테스트 및 브라우저 호환성을 위해 접속 허용
+        // 1. origin이 없는 경우 (curl, Postman, 동일 출처 서버 간 통신 등) 허용
+        if (!origin) {
+          return callback(null, true);
         }
+
+        // 2. 화이트리스트(ALLOWED_ORIGINS)에 포함되어 있는지 검증
+        if (allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+
+        // 3. 허용되지 않은 Origin 차단 (KISA/보안 진단 대비 취약점 방어)
+        console.warn(`[CORS Blocked] Unallowed origin attempted connection: ${origin}`);
+        return callback(new Error("CORS policy violation: Origin not allowed"));
       },
       methods: ["GET", "POST"],
       credentials: true,
