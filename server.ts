@@ -39,15 +39,17 @@ app.prepare().then(() => {
       return;
     }
 
-    // ⭐ 핵심 수정: /socket.io 요청은 Next.js로 넘기지 않고
-    // Socket.io 엔진이 자체 리스너로 처리하도록 그냥 리턴
+    // ✅ 수정: /socket.io 요청이면 Next.js 핸들러(handle)를 실행하지 않고
+    // Socket.io 내부 리스너가 처리할 수 있도록 Next.js 호출만 스킵합니다.
     if (req.url && req.url.startsWith('/socket.io')) {
+      // 아무것도 안 하고 넘어가면 Socket.io가 알아서 httpServer의 request/upgrade 이벤트를 처리합니다.
       return;
     }
 
     handle(req, res);
   });
 
+  // Socket.io 서버 바인딩 (httpServer에 자체 이벤트를 추가로 붙임)
   initSocketServer(httpServer);
 
   httpServer.listen(port, () => {
