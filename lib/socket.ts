@@ -71,9 +71,9 @@ export function initSocketServer(server: HttpServer) {
 
   const io = new SocketIOServer(server, {
     path: "/socket.io",
-    // ALB 504 Gateway Timeout 차단을 위해 WebSocket 연결만 강제 허용
-    transports: ["websocket"],
-    allowUpgrades: false, // Polling -> WebSocket 업그레이드 차단
+    // Polling 및 WebSocket 둘 다 허용 (Polling으로 먼저 세션 연결 후 WebSocket 업그레이드)
+    transports: ["polling", "websocket"],
+    allowUpgrades: true,
     // ALB 연결 유지 인터벌 및 타임아웃 튜닝
     pingTimeout: 20000,
     pingInterval: 25000,
