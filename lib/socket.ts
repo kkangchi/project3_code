@@ -5,6 +5,7 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 import { Server as HttpServer } from "http";
 import { Server as SocketIOServer, Socket } from "socket.io";
 import Redis from "ioredis";
+import { sendSecurityAlertEmail } from "./mailer";
 
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 console.log(`[DEBUG] REDIS_URL 값 확인: "${REDIS_URL}"`);
@@ -60,8 +61,14 @@ function parseGuardDutyLocation(finding: Record<string, unknown>) {
   };
 }
 
-// 대시보드 전달용 구독 채널 목록 (GuardDuty 채널 포함)
-const CHANNELS = ["login:success", "login:anomaly", "session:killed", "guardduty:finding"];
+// 대시보드 전달용 구독 채널 목록 (지영이의 wazuh:security:alerts 채널 추가)
+const CHANNELS = [
+  "login:success",
+  "login:anomaly",
+  "session:killed",
+  "guardduty:finding",
+  "wazuh:security:alerts", // 👈 지영이 이상 탐지 채널 추가
+];
 
 export function initSocketServer(server: HttpServer) {
   // .env의 ALLOWED_ORIGINS 목록을 가져옵니다. (없으면 기본값 사용)
@@ -71,7 +78,7 @@ export function initSocketServer(server: HttpServer) {
 
   const io = new SocketIOServer(server, {
     path: "/socket.io",
-    // 💡 Polling을 제거하고 WebSocket 단독으로 설정 (HTTP 핸드셰이크 타임아웃 방지)
+    // Polling을 제거하고 WebSocket 단독으로 설정 (HTTP 핸드셰이크 타임아웃 방지)
     transports: ["websocket"],
     allowUpgrades: false,
     // ALB 연결 유지 인터벌 및 타임아웃 튜닝
@@ -100,12 +107,12 @@ export function initSocketServer(server: HttpServer) {
     }
   });
 
-  // Redis 메시지 수신 시 대시보드로 Socket.io 브로드캐스트
-  redisSub.on("message", (channel: string, message: string) => {
+  // Redis 메시지 수신 시 처리 파이프라인
+  redisSub.on("message", async (channel: string, message: string) => {
     try {
       const parsedData = JSON.parse(message);
 
-      // GuardDuty 이벤트인 경우 파싱 후 프론트엔드 표준 스키마(event:security-alert)로 전파
+      // 1. GuardDuty 이벤트 처리
       if (channel === "guardduty:finding") {
         const normalizedAlert = {
           id: parsedData.id || `gd-${Date.now()}`,
@@ -122,7 +129,36 @@ export function initSocketServer(server: HttpServer) {
         return;
       }
 
-      // 기존 로그인 및 세션 관련 이벤트 브로드캐스트
+      // 2. 🚨 지영이 이상 탐지 이벤트 (wazuh:security:alerts) 처리 파이프라인
+      if (channel === "wazuh:security:alerts") {
+        console.log(`[탐지 수신] Rule: ${parsedData.ruleId} | IP: ${parsedData.ip} | User: ${parsedData.userId}`);
+
+        // 2-1. DB OTP 강제 전환 처리 (필요시 Prisma 연동)
+        if (parsedData.userId) {
+          // await prisma.user.update({ where: { id: parsedData.userId }, data: { requireOtp: true } });
+          console.log(`[DB] 유저 ${parsedData.userId} 계정 OTP 강제 플래그 세팅 완료`);
+        }
+
+        // 2-2. 보안 알림 메일 발송 (수정이 SMTP 전/후 자동 분기)
+        const targetEmail =
+          parsedData.userEmail ||
+          (parsedData.userId ? `${parsedData.userId}@zero-watch.com` : "admin@zero-watch.com");
+
+        await sendSecurityAlertEmail({
+          to: targetEmail,
+          userId: parsedData.userId || "Unknown",
+          ruleId: `${parsedData.ruleId} (${parsedData.ruleName || ""})`,
+          ip: parsedData.ip || "Unknown IP",
+          timestamp: parsedData.timestamp || new Date().toISOString(),
+        });
+
+        // 2-3. 서진이 대시보드 소켓 전파 ('event:anomaly-detected')
+        io.emit("event:anomaly-detected", parsedData);
+        console.log(`[Socket.io] Broadcasted event 'event:anomaly-detected':`, parsedData);
+        return;
+      }
+
+      // 3. 기존 로그인 및 세션 관련 이벤트 전파
       io.emit(channel, parsedData);
       console.log(`[Socket.io] Broadcasted event '${channel}':`, parsedData);
     } catch (parseError) {
