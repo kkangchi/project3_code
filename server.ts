@@ -1,15 +1,39 @@
 import path from "path";
 import dotenv from "dotenv";
-dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
-import { Server as HttpServer } from "http";
+// 디버그 로그: 현재 __dirname 및 계산된 .env 탐색 경로 확인
+const envPath = path.resolve(__dirname, "../.env");
+console.log(`[DEBUG] __dirname 값: "${__dirname}"`);
+console.log(`[DEBUG] .env 탐색 경로: "${envPath}"`);
+
+// .env 로드 및 결과 확인
+const envConfig = dotenv.config({ path: envPath });
+if (envConfig.error) {
+  console.error("[DEBUG] .env 로드 실패 에러:", envConfig.error);
+} else {
+  console.log("[DEBUG] .env 로드 성공. 로드된 키 목록:", Object.keys(envConfig.parsed || {}));
+}
+
+import { createServer, Server as HttpServer } from "http";
 import { Server as SocketIOServer, Socket } from "socket.io";
 import Redis from "ioredis";
+import next from "next";
 
+// 환경 변수 및 Next.js 옵션 설정
+const port = parseInt(process.env.PORT || "3000", 10);
+const dev = process.env.NODE_ENV !== "production";
+const hostname = process.env.HOSTNAME || "localhost";
+
+const app = next({ dev, hostname, port });
+const handle = app.getRequestHandler();
+
+// Redis 연결 주소 확인
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 console.log(`[DEBUG] REDIS_URL 값 확인: "${REDIS_URL}"`);
 
 const redisSub = new Redis(REDIS_URL, {
+  lazyConnect: true, // httpServer 실행 전 불필요한 동기적 실패 방지
+  maxRetriesPerRequest: null,
   retryStrategy(times) {
     const delay = Math.min(times * 50, 2000);
     return delay;
@@ -50,7 +74,7 @@ function parseGuardDutyLocation(finding: Record<string, unknown>) {
     console.error("[GuardDuty Location Parse Error]:", err);
   }
 
-  // IP/위치 정보가 없거나 파싱 오류 발생 시 서울/IDC 기본 좌표로 Fallback
+  // IP/위치 정보가 없거나 파싱 오류 발생 시 기본 좌표로 Fallback
   return {
     ip: "AWS Internal",
     lat: 37.5665,
@@ -60,36 +84,29 @@ function parseGuardDutyLocation(finding: Record<string, unknown>) {
   };
 }
 
-// 대시보드 전달용 구독 채널 목록 (GuardDuty 채널 포함)
+// 대시보드 전달용 구독 채널 목록
 const CHANNELS = ["login:success", "login:anomaly", "session:killed", "guardduty:finding"];
 
 export function initSocketServer(server: HttpServer) {
-  // .env의 ALLOWED_ORIGINS 목록을 가져옵니다. (없으면 기본값 사용)
   const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
     : ["http://localhost:3000", "http://localhost:3001"];
 
   const io = new SocketIOServer(server, {
     path: "/socket.io",
-    addTrailingSlash: false, // 💡 [핵심] Engine.io가 경로 끝에 /를 붙여 매칭 실패 및 504 타임아웃 일으키는 버그 방지
-    transports: ["polling", "websocket"], // HTTP Polling과 WebSocket 업그레이드 모두 허용
+    addTrailingSlash: false,
+    transports: ["polling", "websocket"],
     allowUpgrades: true,
-    // ALB 연결 유지 인터벌 및 타임아웃 튜닝
     pingTimeout: 20000,
     pingInterval: 25000,
     cors: {
       origin: (origin, callback) => {
-        // 1. origin이 없는 경우 (curl, Postman, 동일 출처 서버 간 통신 등) 허용
         if (!origin) {
           return callback(null, true);
         }
-
-        // 2. 화이트리스트(ALLOWED_ORIGINS)에 포함되어 있는지 검증
         if (allowedOrigins.includes(origin)) {
           return callback(null, true);
         }
-
-        // 3. 허용되지 않은 Origin 차단 (KISA/보안 진단 대비 취약점 방어)
         console.warn(`[CORS Blocked] Unallowed origin attempted connection: ${origin}`);
         return callback(new Error("CORS policy violation: Origin not allowed"));
       },
@@ -98,7 +115,11 @@ export function initSocketServer(server: HttpServer) {
     },
   });
 
-  // Redis 채널 구독 설정
+  // Redis 비동기 연결 수행
+  redisSub.connect().catch((err) => {
+    console.error("[Redis Sub Initial Connect Error]:", err);
+  });
+
   redisSub.subscribe(...CHANNELS, (err, count) => {
     if (err) {
       console.error("[Socket.io] Redis subscribe error:", err);
@@ -107,12 +128,10 @@ export function initSocketServer(server: HttpServer) {
     }
   });
 
-  // Redis 메시지 수신 시 대시보드로 Socket.io 브로드캐스트
   redisSub.on("message", (channel: string, message: string) => {
     try {
       const parsedData = JSON.parse(message);
 
-      // GuardDuty 이벤트인 경우 파싱 후 프론트엔드 표준 스키마(event:security-alert)로 전파
       if (channel === "guardduty:finding") {
         const normalizedAlert = {
           id: parsedData.id || `gd-${Date.now()}`,
@@ -129,7 +148,6 @@ export function initSocketServer(server: HttpServer) {
         return;
       }
 
-      // 기존 로그인 및 세션 관련 이벤트 브로드캐스트
       io.emit(channel, parsedData);
       console.log(`[Socket.io] Broadcasted event '${channel}':`, parsedData);
     } catch (parseError) {
@@ -148,3 +166,20 @@ export function initSocketServer(server: HttpServer) {
 
   return io;
 }
+
+// Next.js 준비 완료 후 서버 실행 구조
+app.prepare().then(() => {
+  const httpServer = createServer((req, res) => {
+    handle(req, res);
+  });
+
+  console.log('[DEBUG] Redis 연결 완료 후 initSocketServer 호출 직전');
+  initSocketServer(httpServer);
+  console.log('[DEBUG] initSocketServer 반환됨');
+
+  httpServer.listen(port, () => {
+    console.log(`[DEBUG] listen 콜백 진입 — Ready on port ${port}`);
+  });
+}).catch((err) => {
+  console.error('[Server Preparation Error]:', err);
+});
