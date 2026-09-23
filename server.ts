@@ -1,16 +1,4 @@
-import path from "path";
-import dotenv from "dotenv";
-
-const envPath = path.resolve(__dirname, "./.env");
-console.log(`[DEBUG] __dirname 값: "${__dirname}"`);
-console.log(`[DEBUG] .env 탐색 경로: "${envPath}"`);
-
-const envConfig = dotenv.config({ path: envPath });
-if (envConfig.error) {
-  console.error("[DEBUG] .env 로드 실패 에러:", envConfig.error);
-} else {
-  console.log("[DEBUG] .env 로드 성공. 로드된 키 목록:", Object.keys(envConfig.parsed || {}));
-}
+import "./lib/loadEnv"; // 💡 반드시 최상단! 다른 모든 import보다 먼저 실행됨
 
 import { createServer, Server as HttpServer } from "http";
 import { Server as SocketIOServer, Socket } from "socket.io";
@@ -46,7 +34,6 @@ redisSub.on("error", (err) => {
   console.error("[Redis Sub Error]:", err);
 });
 
-// Record 대신 인덱스 시그니처({ [key: string]: unknown }) 사용
 function parseGuardDutyLocation(finding: { [key: string]: unknown }) {
   try {
     const service = finding.service as { [key: string]: unknown } | undefined;
