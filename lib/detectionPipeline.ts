@@ -2,6 +2,19 @@ import Redis from "ioredis";
 import { sendSecurityAlertEmail } from "@/lib/mailer";
 import type { Server as SocketIOServer } from "socket.io";
 
+interface WazuhAlertData {
+  ruleId: string;
+  ruleName?: string;
+  severity?: number;
+  timestamp?: string;
+  ip?: string;
+  userId?: string | null;
+  userEmail?: string;
+  country?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
 let detectionSub: Redis | null = null;
 let isSubscribed = false;
 
@@ -31,18 +44,23 @@ export function initDetectionPipeline(io: SocketIOServer) {
     detectionSub.on("message", async (channel: string, message: string) => {
       if (channel !== "wazuh:security:alerts") return;
 
+      let data: WazuhAlertData;
       try {
-        const data = JSON.parse(message);
+        data = JSON.parse(message) as WazuhAlertData;
         console.log(`[탐지 수신] Rule: ${data.ruleId} | IP: ${data.ip} | User: ${data.userId}`);
+      } catch (err) {
+        console.error("[탐지 파이프라인] JSON 파싱 에러:", err);
+        return;
+      }
 
-        if (data.userId) {
-          console.log(`[DB] 유저 '${data.userId}' 계정 OTP 강제 플래그 세팅`);
-        }
+      if (data.userId) {
+        console.log(`[DB] 유저 '${data.userId}' 계정 OTP 강제 플래그 세팅`);
+      }
 
+      try {
         const targetEmail =
           data.userEmail ||
           (data.userId ? `${data.userId}@zero-watch.com` : "admin@zero-watch.com");
-
         const formattedRuleId = data.ruleName ? `${data.ruleId} (${data.ruleName})` : data.ruleId;
 
         await sendSecurityAlertEmail({
@@ -52,11 +70,15 @@ export function initDetectionPipeline(io: SocketIOServer) {
           ip: data.ip || "Unknown IP",
           timestamp: data.timestamp || new Date().toISOString(),
         });
+      } catch (mailErr) {
+        console.error("[탐지 파이프라인] 메일 발송 단계 실패 (무시하고 계속 진행):", mailErr);
+      }
 
+      try {
         io.emit("event:anomaly-detected", data);
         console.log(`[Socket.io] 'event:anomaly-detected' 브로드캐스트 전달 완료`);
-      } catch (err) {
-        console.error("[탐지 파이프라인] 이벤트 처리 중 에러 발생:", err);
+      } catch (socketErr) {
+        console.error("[탐지 파이프라인] 소켓 전달 실패:", socketErr);
       }
     });
   }
