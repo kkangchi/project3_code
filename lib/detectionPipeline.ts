@@ -28,13 +28,12 @@ export function initDetectionPipeline(io: SocketIOServer) {
       console.error("[탐지 파이프라인 Redis Sub 에러]:", err);
     });
 
-    // 메시지 수신 리스너 1회만 등록
     detectionSub.on("message", async (channel: string, message: string) => {
       if (channel !== "wazuh:security:alerts") return;
 
       try {
         const data = JSON.parse(message);
-        console.log(`[탐지 수신] Rule: \({data.ruleId} | IP:\){data.ip} | User: ${data.userId}`);
+        console.log(`[탐지 수신] Rule: ${data.ruleId} | IP: ${data.ip} | User: ${data.userId}`);
 
         if (data.userId) {
           console.log(`[DB] 유저 '${data.userId}' 계정 OTP 강제 플래그 세팅`);
@@ -44,7 +43,7 @@ export function initDetectionPipeline(io: SocketIOServer) {
           data.userEmail ||
           (data.userId ? `${data.userId}@zero-watch.com` : "admin@zero-watch.com");
 
-        const formattedRuleId = data.ruleName ? `\({data.ruleId} (\){data.ruleName})` : data.ruleId;
+        const formattedRuleId = data.ruleName ? `${data.ruleId} (${data.ruleName})` : data.ruleId;
 
         await sendSecurityAlertEmail({
           to: targetEmail,
@@ -56,7 +55,6 @@ export function initDetectionPipeline(io: SocketIOServer) {
 
         io.emit("event:anomaly-detected", data);
         console.log(`[Socket.io] 'event:anomaly-detected' 브로드캐스트 전달 완료`);
-
       } catch (err) {
         console.error("[탐지 파이프라인] 이벤트 처리 중 에러 발생:", err);
       }
@@ -66,17 +64,20 @@ export function initDetectionPipeline(io: SocketIOServer) {
   const CHANNEL = "wazuh:security:alerts";
 
   if (!isSubscribed) {
-    detectionSub.connect().then(() => {
-      detectionSub?.subscribe(CHANNEL, (err) => {
-        if (err) {
-          console.error(`[탐지 파이프라인] '${CHANNEL}' 채널 구독 실패:`, err);
-        } else {
-          isSubscribed = true;
-          console.log(`[탐지 파이프라인] '${CHANNEL}' 채널 구독 시작 완료`);
-        }
+    detectionSub
+      .connect()
+      .then(() => {
+        detectionSub?.subscribe(CHANNEL, (err) => {
+          if (err) {
+            console.error(`[탐지 파이프라인] '${CHANNEL}' 채널 구독 실패:`, err);
+          } else {
+            isSubscribed = true;
+            console.log(`[탐지 파이프라인] '${CHANNEL}' 채널 구독 시작 완료`);
+          }
+        });
+      })
+      .catch((err) => {
+        console.error(`[탐지 파이프라인] Redis 연결 초기화 실패:`, err);
       });
-    }).catch((err) => {
-      console.error(`[탐지 파이프라인] Redis 연결 초기화 실패:`, err);
-    });
   }
 }
