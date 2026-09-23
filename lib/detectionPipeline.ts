@@ -1,4 +1,5 @@
 import Redis from "ioredis";
+import { prisma } from "@/lib/prisma";
 import { sendSecurityAlertEmail } from "@/lib/mailer";
 import type { Server as SocketIOServer } from "socket.io";
 
@@ -53,10 +54,20 @@ export function initDetectionPipeline(io: SocketIOServer) {
         return;
       }
 
+      // 1. userId가 있으면 실제 DB에서 해당 계정을 HIGH 프로파일로 강제 전환 (OTP 필수화)
       if (data.userId) {
-        console.log(`[DB] 유저 '${data.userId}' 계정 OTP 강제 플래그 세팅`);
+        try {
+          await prisma.user.update({
+            where: { id: data.userId },
+            data: { profile: "HIGH" },
+          });
+          console.log(`[DB] 유저 '${data.userId}' 계정 HIGH 프로파일로 강제 전환 완료`);
+        } catch (dbErr) {
+          console.error(`[탐지 파이프라인] 유저 '${data.userId}' DB 업데이트 실패 (계정 없거나 ID 불일치 가능):`, dbErr);
+        }
       }
 
+      // 2. 보안 알림 메일 발송 (실패해도 아래 소켓 전달에 영향 없도록 격리)
       try {
         const targetEmail =
           data.userEmail ||
@@ -74,6 +85,7 @@ export function initDetectionPipeline(io: SocketIOServer) {
         console.error("[탐지 파이프라인] 메일 발송 단계 실패 (무시하고 계속 진행):", mailErr);
       }
 
+      // 3. 대시보드로 소켓 전달
       try {
         io.emit("event:anomaly-detected", data);
         console.log(`[Socket.io] 'event:anomaly-detected' 브로드캐스트 전달 완료`);
