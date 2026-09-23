@@ -19,6 +19,23 @@ interface WazuhAlertData {
 let detectionSub: Redis | null = null;
 let isSubscribed = false;
 
+// 실제 메일서버가 사용하는 도메인 (하이픈 있음! zerowatch.com 아님)
+const REAL_MAIL_DOMAIN = "@zero-watch.com";
+
+function resolveTargetEmail(data: WazuhAlertData): string {
+  // userEmail이 실제 메일서버 도메인(zero-watch.com)으로 끝나는 경우에만 그대로 사용
+  if (data.userEmail && data.userEmail.endsWith(REAL_MAIL_DOMAIN)) {
+    return data.userEmail;
+  }
+  // 도메인이 다르거나(예: zerowatch.com), 값이 없으면 안전하게 관리자 메일함으로 고정
+  if (data.userEmail) {
+    console.warn(
+      `[탐지 파이프라인] userEmail '${data.userEmail}'이 실제 메일 도메인(${REAL_MAIL_DOMAIN})과 불일치, 관리자 메일함으로 대체함`
+    );
+  }
+  return "admin@zero-watch.com";
+}
+
 export function initDetectionPipeline(io: SocketIOServer) {
   console.log("[DEBUG] initDetectionPipeline 함수 호출됨");
 
@@ -69,9 +86,7 @@ export function initDetectionPipeline(io: SocketIOServer) {
 
       // 2. 보안 알림 메일 발송 (실패해도 아래 소켓 전달에 영향 없도록 격리)
       try {
-        const targetEmail =
-          data.userEmail ||
-          (data.userId ? `${data.userId}@zero-watch.com` : "admin@zero-watch.com");
+        const targetEmail = resolveTargetEmail(data);
         const formattedRuleId = data.ruleName ? `${data.ruleId} (${data.ruleName})` : data.ruleId;
 
         await sendSecurityAlertEmail({
