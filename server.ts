@@ -1,7 +1,7 @@
 import path from "path";
 import dotenv from "dotenv";
 
-const envPath = path.resolve(__dirname, "../.env");
+const envPath = path.resolve(__dirname, "./.env");
 console.log(`[DEBUG] __dirname 값: "${__dirname}"`);
 console.log(`[DEBUG] .env 탐색 경로: "${envPath}"`);
 
