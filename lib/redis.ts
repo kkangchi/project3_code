@@ -1,27 +1,17 @@
 import Redis from 'ioredis';
 
-// .env에 설정된 REDIS_URL을 우선 사용하고, 없을 경우에만 기본값 사용
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
-// 메인 Redis 클라이언트
 export const redis = new Redis(REDIS_URL);
-
-// Pub/Sub 전용 Redis 클라이언트 (이벤트 발행용)
 export const redisPub = new Redis(REDIS_URL);
 
-// Redis 접속 에러 핸들러 (unhandled error 방지)
 redis.on('error', (err) => console.error('[Redis Error]:', err));
 redisPub.on('error', (err) => console.error('[Redis Pub Error]:', err));
 
-// sessionId만으로 세션 조회 가능한 키 구조
 export const getSessionKey = (sessionId: string) => `session:${sessionId}`;
 export const getUserSessionsKey = (userId: string) => `user_sessions:${userId}`;
 
-/**
- * sessionId 기준 단일 세션 파기
- * userId는 파기 직전 Redis에 저장된 세션 데이터에서 추출
- */
-export async function revokeSession(sessionId: string, reason: string = "ADMIN_REVOKE"){
+export async function revokeSession(sessionId: string, reason: string = "ADMIN_REVOKE") {
   const sessionKey = getSessionKey(sessionId);
   const rawData = await redis.get(sessionKey);
 
@@ -48,18 +38,22 @@ export async function revokeSession(sessionId: string, reason: string = "ADMIN_R
   return { success: true, userId };
 }
 
-/**
- * [스텝3] 지영이 이상 탐지 이벤트를 Redis 채널('wazuh:security:alerts')로 발행(Publish)하는 함수
- */
+// Record 대신 인덱스 시그니처({ [key: string]: unknown }) 사용
 export async function publishAnomalyAlert(alertData: {
-  userId?: string;
-  userEmail?: string;
   ruleId: string;
+  wazuhRuleId?: string;
   ruleName?: string;
-  ip?: string;
+  severity?: number;
   timestamp?: string;
+  source?: string;
+  ip?: string;
+  userId?: string | null;
+  userEmail?: string | null;
+  country?: string | null;
+  message?: string;
+  details?: { [key: string]: unknown };
   [key: string]: unknown;
-}){
+}) {
   try {
     const channel = "wazuh:security:alerts";
     const payload = JSON.stringify({
