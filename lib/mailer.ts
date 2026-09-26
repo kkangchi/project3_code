@@ -1,17 +1,16 @@
 import nodemailer from "nodemailer";
 
-// 수정이가 구축한 Postfix/Dovecot SMTP Transporter 설정
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "10.2.11.121",
   port: Number(process.env.SMTP_PORT) || 25,
-  secure: false, // 25번 포트는 STARTTLS를 사용하므로 false
-  requireTLS: true, // STARTTLS 강제
+  secure: false,
+  requireTLS: true,
   auth: {
     user: process.env.SMTP_USER || "alert",
     pass: process.env.SMTP_PASS || "1234",
   },
   tls: {
-    rejectUnauthorized: false, // 자체 서명 인증서 승인
+    rejectUnauthorized: false,
   },
 });
 
@@ -23,27 +22,32 @@ export interface SecurityAlertEmailPayload {
   timestamp: string;
 }
 
-/**
-  이상 탐지 시 담당자/유저에게 보안 경고 메일을 발송합니다.
- */
+const UNKNOWN_USER_MARKER = "Unknown (IP-based)";
+
 export async function sendSecurityAlertEmail(payload: SecurityAlertEmailPayload) {
   const { to, userId, ruleId, ip, timestamp } = payload;
+  const hasUser = userId && userId !== UNKNOWN_USER_MARKER;
+
+  const subjectTitle = hasUser ? "계정 이상 행위 탐지" : "인프라 공격 탐지";
+  const subjectTarget = hasUser ? userId : `IP ${ip}`;
+  const userRowLabel = hasUser ? "대상 유저 ID" : "대상 유저";
+  const userRowValue = hasUser ? userId : "해당 없음 (계정 미연동 공격)";
 
   const mailOptions = {
     from: process.env.SMTP_FROM || '"Zero-Watch Security" <alert@zero-watch.com>',
     to,
-    subject: `🚨 [Zero-Watch 보안 경고] 계정 이상 행위 탐지 - ${userId}`,
+    subject: `🚨 [Zero-Watch 보안 경고] ${subjectTitle} - ${subjectTarget}`,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; padding: 24px; background-color: #ffffff;">
         <h2 style="color: #d9534f; margin-top: 0;">⚠️ Zero-Watch 보안 경고 알림</h2>
         <p style="font-size: 15px; color: #333333;">
-          Zero-Watch IDC 보안 모니터링 시스템에서 계정의 이상 행위를 탐지하여 자동 제어 조치(OTP 강제 요구 등)를 적용했습니다.
+          Zero-Watch IDC 보안 모니터링 시스템에서 ${hasUser ? "계정의 이상 행위를" : "인프라 레벨 공격을"} 탐지하여 자동 제어 조치를 적용했습니다.
         </p>
         <hr style="border: 0; border-top: 1px solid #eeeeee; margin: 20px 0;" />
         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
           <tr>
-            <td style="padding: 8px 0; color: #666666; width: 120px;"><strong>대상 유저 ID:</strong></td>
-            <td style="padding: 8px 0; color: #111111;">${userId}</td>
+            <td style="padding: 8px 0; color: #666666; width: 120px;"><strong>${userRowLabel}:</strong></td>
+            <td style="padding: 8px 0; color: #111111;">${userRowValue}</td>
           </tr>
           <tr>
             <td style="padding: 8px 0; color: #666666;"><strong>탐지 룰 ID:</strong></td>
